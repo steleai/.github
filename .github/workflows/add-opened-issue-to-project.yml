@@ -43,7 +43,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.app_client_id }}
+          client-id: ${{ secrets.app_client_id }}
           private-key: ${{ secrets.app_private_key }}
           owner: steleai
 
