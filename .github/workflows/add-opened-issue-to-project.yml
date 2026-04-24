@@ -1,0 +1,102 @@
+name: Add Opened Issue To Org Project
+
+on:
+  workflow_call:
+    inputs:
+      issue_node_id:
+        description: Node ID of the opened issue
+        required: true
+        type: string
+      issue_url:
+        description: HTML URL of the opened issue
+        required: true
+        type: string
+      source_repository:
+        description: Source repository in owner/name format
+        required: true
+        type: string
+      issue_number:
+        description: Number of the opened issue
+        required: true
+        type: number
+      project_number:
+        description: Organization project number
+        required: true
+        type: number
+    secrets:
+      app_client_id:
+        description: GitHub App client ID
+        required: true
+      app_private_key:
+        description: GitHub App private key
+        required: true
+
+jobs:
+  add-to-project:
+    name: Add issue to steleai project
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.app_client_id }}
+          private-key: ${{ secrets.app_private_key }}
+          owner: steleai
+
+      - name: Resolve organization project node ID
+        id: project
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          project_id="$(gh api graphql \
+            -f query='query($login:String!, $number:Int!) { organization(login: $login) { projectV2(number: $number) { id } } }' \
+            -f login='steleai' \
+            -F number='${{ inputs.project_number }}' \
+            --jq '.data.organization.projectV2.id')"
+
+          if [ -z "$project_id" ] || [ "$project_id" = "null" ]; then
+            echo "Unable to resolve steleai project #${{ inputs.project_number }}" >&2
+            exit 1
+          fi
+
+          echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+
+      - name: Add issue item to project
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          echo "Adding issue #${{ inputs.issue_number }} from ${{ inputs.source_repository }}"
+          echo "Issue URL: ${{ inputs.issue_url }}"
+
+          output_file="$(mktemp)"
+          set +e
+          gh api graphql \
+            -f query='mutation($projectId:ID!, $contentId:ID!) { addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) { item { id } } }' \
+            -f projectId='${{ steps.project.outputs.project_id }}' \
+            -f contentId='${{ inputs.issue_node_id }}' \
+            >"$output_file" 2>&1
+          status=$?
+          set -e
+
+          if [ "$status" -eq 0 ]; then
+            echo "Issue added to project successfully."
+            exit 0
+          fi
+
+          if grep -Eiq 'already exists|already in the project|already added' "$output_file"; then
+            echo "Issue is already present in the project; treating as success."
+            cat "$output_file"
+            exit 0
+          fi
+
+          echo "Failed to add issue to project." >&2
+          cat "$output_file" >&2
+          exit "$status"
