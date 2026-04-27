@@ -56,7 +56,6 @@ jobs:
         with:
           client-id: ${{ secrets.app_client_id }}
           private-key: ${{ secrets.app_private_key }}
-          owner: steleai
 
       - name: Resolve organization project node ID
         id: project
