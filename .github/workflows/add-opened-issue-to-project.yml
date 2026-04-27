@@ -21,8 +21,9 @@ on:
         type: number
       project_number:
         description: Organization project number
-        required: true
+        required: false
         type: number
+        default: 1
       status_field_name:
         description: Name of the single-select project field used for workflow state
         required: false
