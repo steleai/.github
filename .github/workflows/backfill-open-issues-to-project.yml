@@ -1,38 +1,29 @@
-# Reusable workflow that backfills open issues from selected repositories into the org project.
+# Backfills currently open issues from selected repositories into the org project.
 name: Backfill Open Issues To Org Project
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
       project_number:
         description: Organization project number
-        required: false
+        required: true
         type: number
         default: 1
       repositories:
-        description: Newline-separated repository names under steleai to backfill
-        required: false
+        description: Comma-separated repository names under steleai to backfill
+        required: true
         type: string
-        default: |
-          SprintAct
-          planning_board
+        default: SprintAct,planning_board
       status_field_name:
         description: Project single-select field used for workflow state
-        required: false
+        required: true
         type: string
         default: Status
       status_option_name:
         description: Project status option to set on backfilled issues
-        required: false
+        required: true
         type: string
         default: Backlog
-    secrets:
-      app_client_id:
-        description: GitHub App client ID
-        required: true
-      app_private_key:
-        description: GitHub App private key
-        required: true
 
 jobs:
   backfill-open-issues:
@@ -46,8 +37,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          client-id: ${{ secrets.app_client_id }}
-          private-key: ${{ secrets.app_private_key }}
+          client-id: ${{ secrets.STELEAI_PROJECT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.STELEAI_PROJECT_APP_PRIVATE_KEY }}
           owner: steleai
           repositories: ${{ inputs.repositories }}
 
@@ -233,8 +224,8 @@ jobs:
             fi
           }
 
-          while IFS= read -r repo_name; do
-            repo_name="${repo_name//[$'\t\r\n ']/}"
+          printf '%s' "$REPOSITORIES" | tr ',' '\n' | while IFS= read -r repo_name; do
+            repo_name="$(printf '%s' "$repo_name" | xargs)"
             if [ -z "$repo_name" ]; then
               continue
             fi
@@ -269,4 +260,4 @@ jobs:
                 break
               fi
             done
-          done <<<"$REPOSITORIES"
+          done
