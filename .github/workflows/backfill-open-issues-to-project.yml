@@ -20,14 +20,14 @@ on:
         type: string
         default: Status
       status_option_name:
-        description: Project status option to set on backfilled issues
+        description: Project status option to set on newly backfilled issues
         required: true
         type: string
         default: Backlog
 
 jobs:
   backfill-open-issues:
-    name: Backfill open issues to steleai project
+    name: Backfill missing open issues to steleai project
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -42,7 +42,7 @@ jobs:
           owner: steleai
           repositories: ${{ inputs.repositories }}
 
-      - name: Backfill open issues into project backlog
+      - name: Backfill missing open issues into project backlog
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PROJECT_NUMBER: ${{ inputs.project_number }}
@@ -195,33 +195,36 @@ jobs:
             exit 1
           fi
 
-          add_or_update_issue() {
+          add_missing_issue() {
             local repo_name="$1"
             local issue_number="$2"
             local issue_id="$3"
             local existing_item_id="$4"
 
-            local item_id="$existing_item_id"
-            if [ -z "$item_id" ] || [ "$item_id" = "null" ]; then
-              echo "Adding steleai/$repo_name#$issue_number to project"
-              add_json="$(gh api graphql \
-                -f query="$add_item_mutation" \
-                -f projectId="$project_id" \
-                -f contentId="$issue_id")"
-              item_id="$(jq -r '.data.addProjectV2ItemById.item.id' <<<"$add_json")"
-            else
-              echo "steleai/$repo_name#$issue_number is already in project"
+            if [ -n "$existing_item_id" ] && [ "$existing_item_id" != "null" ]; then
+              echo "steleai/$repo_name#$issue_number is already in project; leaving status unchanged"
+              return 0
             fi
 
-            if [ -n "$item_id" ] && [ "$item_id" != "null" ]; then
-              gh api graphql \
-                -f query="$update_status_mutation" \
-                -f projectId="$project_id" \
-                -f itemId="$item_id" \
-                -f fieldId="$status_field_id" \
-                -f optionId="$status_option_id" >/dev/null
-              echo "Set steleai/$repo_name#$issue_number status to $STATUS_OPTION_NAME"
+            echo "Adding steleai/$repo_name#$issue_number to project"
+            add_json="$(gh api graphql \
+              -f query="$add_item_mutation" \
+              -f projectId="$project_id" \
+              -f contentId="$issue_id")"
+            item_id="$(jq -r '.data.addProjectV2ItemById.item.id' <<<"$add_json")"
+
+            if [ -z "$item_id" ] || [ "$item_id" = "null" ]; then
+              echo "Unable to resolve created project item for steleai/$repo_name#$issue_number" >&2
+              exit 1
             fi
+
+            gh api graphql \
+              -f query="$update_status_mutation" \
+              -f projectId="$project_id" \
+              -f itemId="$item_id" \
+              -f fieldId="$status_field_id" \
+              -f optionId="$status_option_id" >/dev/null
+            echo "Added steleai/$repo_name#$issue_number and set status to $STATUS_OPTION_NAME"
           }
 
           printf '%s' "$REPOSITORIES" | tr ',' '\n' | while IFS= read -r repo_name; do
@@ -251,7 +254,7 @@ jobs:
                 issue_id="$(jq -r ".data.repository.issues.nodes[$i].id" <<<"$issues_json")"
                 issue_number="$(jq -r ".data.repository.issues.nodes[$i].number" <<<"$issues_json")"
                 existing_item_id="$(jq -r --arg project_id "$project_id" --argjson i "$i" "$existing_item_filter" <<<"$issues_json" | head -n 1)"
-                add_or_update_issue "$repo_name" "$issue_number" "$issue_id" "$existing_item_id"
+                add_missing_issue "$repo_name" "$issue_number" "$issue_id" "$existing_item_id"
               done
 
               has_next="$(jq -r '.data.repository.issues.pageInfo.hasNextPage' <<<"$issues_json")"
